@@ -52,7 +52,7 @@ class Args:
 
     # Evaluation
     num_evals: int = 20
-    eval_freq: int = 10000
+    eval_freq: int = None
     eval_episodes: int = 20
 
     # Algorithm specific arguments
@@ -97,6 +97,8 @@ class Args:
             run_id = get_latest_run_id(log_path=self.output_dir, log_name='run_') + 1
             self.output_dir += f"/run_{run_id}"
 
+        if self.eval_freq is None:
+            self.eval_freq = max(self.total_timesteps // self.num_evals, 1)
 
 if __name__ == "__main__":
     import stable_baselines3 as sb3
