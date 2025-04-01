@@ -46,7 +46,7 @@ class Args:
 
     # Logging
     output_rootdir: str = 'results'
-    output_subdir: str = None
+    output_subdir: str = ''
     run_id: int = None
     seed: int = None
 
@@ -83,21 +83,21 @@ class Args:
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
 
-    def __init__(self):
+    def __post_init__(self):
 
         # Seeding
-        if args.run_id:
-            args.seed = args.run_id
-        elif args.seed is None:
-            args.seed = np.random.randint(2 ** 32 - 1)
+        if self.run_id:
+            self.seed = self.run_id
+        elif self.seed is None:
+            self.seed = np.random.randint(2 ** 32 - 1)
 
         # Output path setup
-        args.output_dir = f"{args.output_rootdir}/{args.env_id}/td3/{args.output_subdir}"
-        if args.run_id is not None:
-            args.output_dir += f"/run_{args.run_id}"
+        self.output_dir = f"{self.output_rootdir}/{self.env_id}/td3/{self.output_subdir}"
+        if self.run_id is not None:
+            self.output_dir += f"/run_{self.run_id}"
         else:
-            run_id = get_latest_run_id(log_path=args.output_dir, log_name='run_') + 1
-            args.output_dir += f"/run_{run_id}"
+            run_id = get_latest_run_id(log_path=self.output_dir, log_name='run_') + 1
+            self.output_dir += f"/run_{run_id}"
 
 
 if __name__ == "__main__":

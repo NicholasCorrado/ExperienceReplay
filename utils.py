@@ -2,7 +2,9 @@ from collections import defaultdict
 
 import numpy as np
 import torch
+from torch import nn
 
+import gymnasium as gym
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():

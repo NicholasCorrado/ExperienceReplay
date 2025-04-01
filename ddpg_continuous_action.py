@@ -1,7 +1,9 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ddpg/#ddpg_continuous_actionpy
+import copy
 import os
 import random
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 
 import gymnasium as gym
@@ -11,16 +13,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
+import yaml
 from stable_baselines3.common.buffers import ReplayBuffer
-from torch.utils.tensorboard import SummaryWriter
+from stable_baselines3.common.utils import get_latest_run_id
+
+from utils import Actor, QNetwork, make_env, simulate
 
 
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 1
-    """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
@@ -39,14 +42,28 @@ class Args:
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
+    save_policy: bool = False
+
+    # Logging
+    output_rootdir: str = 'results'
+    output_subdir: str = ''
+    run_id: int = None
+    seed: int = None
+
+    # Evaluation
+    num_evals: int = 20
+    eval_freq: int = 10000
+    eval_episodes: int = 20
 
     # Algorithm specific arguments
     env_id: str = "Hopper-v4"
-    """the environment id of the Atari game"""
+    """the id of the environment"""
     total_timesteps: int = 1000000
     """total timesteps of the experiments"""
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
+    num_envs: int = 1
+    """the number of parallel game environments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
     gamma: float = 0.99
@@ -64,56 +81,21 @@ class Args:
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
 
+    def __post_init__(self):
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        # Seeding
+        if self.run_id:
+            self.seed = self.run_id
+        elif self.seed is None:
+            self.seed = np.random.randint(2 ** 32 - 1)
+
+        # Output path setup
+        self.output_dir = f"{self.output_rootdir}/{self.env_id}/ddpg/{self.output_subdir}"
+        if self.run_id is not None:
+            self.output_dir += f"/run_{self.run_id}"
         else:
-            env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
-        return env
-
-    return thunk
-
-
-# ALGO LOGIC: initialize agent here:
-class QNetwork(nn.Module):
-    def __init__(self, env):
-        super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
-
-    def forward(self, x, a):
-        x = torch.cat([x, a], 1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
-
-
-class Actor(nn.Module):
-    def __init__(self, env):
-        super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_mu = nn.Linear(256, np.prod(env.single_action_space.shape))
-        # action rescaling
-        self.register_buffer(
-            "action_scale", torch.tensor((env.action_space.high - env.action_space.low) / 2.0, dtype=torch.float32)
-        )
-        self.register_buffer(
-            "action_bias", torch.tensor((env.action_space.high + env.action_space.low) / 2.0, dtype=torch.float32)
-        )
-
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = torch.tanh(self.fc_mu(x))
-        return x * self.action_scale + self.action_bias
+            run_id = get_latest_run_id(log_path=self.output_dir, log_name='run_') + 1
+            self.output_dir += f"/run_{run_id}"
 
 
 if __name__ == "__main__":
@@ -126,35 +108,34 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 """
         )
     args = tyro.cli(Args)
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = args.torch_deterministic
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(os.path.join(args.output_dir, "config.yml"), "w") as f:
+        yaml.dump(args, f, sort_keys=True)
+
     if args.track:
         import wandb
 
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,
             config=vars(args),
-            name=run_name,
+            name=args.output_dir,
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv(
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, "") for i in range(args.num_envs)]
+    )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     actor = Actor(envs).to(device)
@@ -174,6 +155,10 @@ poetry run pip install "stable_baselines3==2.0.0a1"
         device,
         handle_timeout_termination=False,
     )
+
+    # Logging
+    logs = defaultdict(list)
+    eval_count = 0
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
@@ -190,14 +175,6 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
@@ -237,38 +214,58 @@ poetry run pip install "stable_baselines3==2.0.0a1"
                 for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
-            if global_step % 100 == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                print("SPS:", int(global_step / (time.time() - start_time)))
-                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        # Evaluation
+        if global_step % args.eval_freq == 0:
+            eval_count += 1
+            envs_eval = copy.deepcopy(envs)
+
+            return_avg, return_std, success_avg, success_std = simulate(
+                env=envs_eval,
+                actor=actor,
+                eval_episodes=args.eval_episodes
+            )
+
+            print(
+                f"Eval num_timesteps={global_step}, "
+                f"episode_return={return_avg:.2f} +/- {return_std:.2f}\n"
+                f"episode_success={success_avg:.2f} +/- {success_std:.2f}\n"
+            )
+
+            # Log metrics
+            logs['timestep'].append(global_step)
+            logs['return'].append(return_avg)
+            logs['success_rate'].append(success_avg)
+
+            if global_step > args.learning_starts:
+                # Log DDPG specific metrics
+                logs['ddpg/q_loss'].append(qf1_loss.item())
+                logs['ddpg/q_values'].append(qf1_a_values.mean().item())
+                logs['ddpg/actor_loss'].append(actor_loss.item() if 'actor_loss' in locals() else 0.0)
+
+            # Calculate steps per second
+            sps = int(global_step / (time.time() - start_time))
+            logs['sps'].append(sps)
+
+            # Save logs
+            np.savez(
+                f'{args.output_dir}/evaluations.npz',
+                **logs,
+            )
+
+            # Save policy if requested
+            if args.save_policy:
+                torch.save(actor, f"{args.output_dir}/policy_{eval_count}.pt")
+
+            # Log to wandb if tracking
+            if args.track:
+                log_wandb = {}
+                for key, value in logs.items():
+                    log_wandb[key] = value[-1]
+                wandb.log(log_wandb)
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"{args.output_dir}/policy.pt"
         torch.save((actor.state_dict(), qf1.state_dict()), model_path)
         print(f"model saved to {model_path}")
-        from cleanrl_utils.evals.ddpg_eval import evaluate
-
-        episodic_returns = evaluate(
-            model_path,
-            make_env,
-            args.env_id,
-            eval_episodes=10,
-            run_name=f"{run_name}-eval",
-            Model=(Actor, QNetwork),
-            device=device,
-            exploration_noise=args.exploration_noise,
-        )
-        for idx, episodic_return in enumerate(episodic_returns):
-            writer.add_scalar("eval/episodic_return", episodic_return, idx)
-
-        if args.upload_model:
-            from cleanrl_utils.huggingface import push_to_hub
-
-            repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-            repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "DDPG", f"runs/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
-    writer.close()
