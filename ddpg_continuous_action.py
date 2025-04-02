@@ -14,9 +14,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 import yaml
-from stable_baselines3.common.buffers import ReplayBuffer
+# from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.utils import get_latest_run_id
 
+from replay_buffer import ReplayBuffer
 from utils import Actor, QNetwork, make_env, simulate
 
 
@@ -56,9 +57,9 @@ class Args:
     eval_episodes: int = 20
 
     # Algorithm specific arguments
-    env_id: str = "Hopper-v4"
+    env_id: str = "InvertedPendulum"
     """the id of the environment"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 100000
     """total timesteps of the experiments"""
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
@@ -80,6 +81,9 @@ class Args:
     """the frequency of training policy (delayed)"""
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
+
+    adaptive: bool = False
+    temperature: float = 1
 
     def __post_init__(self):
 
@@ -190,7 +194,10 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
+            if args.adaptive:
+                data = rb.sample_adaptive(args.batch_size, args.learning_starts, args.temperature)
+            else:
+                data = rb.sample(args.batch_size)
             with torch.no_grad():
                 next_state_actions = target_actor(data.next_observations)
                 qf1_next_target = qf1_target(data.next_observations, next_state_actions)

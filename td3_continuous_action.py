@@ -14,10 +14,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 import yaml
-from stable_baselines3.common.buffers import ReplayBuffer
+# from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.utils import get_latest_run_id
 
-from utils import simulate, make_env, Actor, QNetwork  # Assuming you have the same utils.py file
+from replay_buffer import ReplayBuffer
+from utils import Actor, QNetwork, make_env, simulate
 
 
 @dataclass
@@ -82,6 +83,9 @@ class Args:
     """the frequency of training policy (delayed)"""
     noise_clip: float = 0.5
     """noise clip parameter of the Target Policy Smoothing Regularization"""
+
+    adaptive: bool = False
+    temperature: float = 1
 
     def __post_init__(self):
 
@@ -198,7 +202,10 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
+            if args.adaptive:
+                data = rb.sample_adaptive(args.batch_size, args.learning_starts, args.temperature)
+            else:
+                data = rb.sample(args.batch_size)
             with torch.no_grad():
                 clipped_noise = (torch.randn_like(data.actions, device=device) * args.policy_noise).clamp(
                     -args.noise_clip, args.noise_clip
