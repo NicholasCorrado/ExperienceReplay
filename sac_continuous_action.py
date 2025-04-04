@@ -1,7 +1,9 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
+import copy
 import os
 import random
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 
 import gymnasium as gym
@@ -11,16 +13,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
+import yaml
 from stable_baselines3.common.buffers import ReplayBuffer
-from torch.utils.tensorboard import SummaryWriter
+from stable_baselines3.common.utils import get_latest_run_id
+
+from utils import make_env, simulate
 
 
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 1
-    """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
@@ -33,6 +36,24 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    save_model: bool = False
+    """whether to save model into the `runs/{run_name}` folder"""
+    upload_model: bool = False
+    """whether to upload the saved model to huggingface"""
+    hf_entity: str = ""
+    """the user or org name of the model repository from the Hugging Face Hub"""
+    save_policy: bool = False
+
+    # Logging
+    output_rootdir: str = 'results'
+    output_subdir: str = ''
+    run_id: int = None
+    seed: int = None
+
+    # Evaluation
+    num_evals: int = 40
+    eval_freq: int = None
+    eval_episodes: int = 20
 
     # Algorithm specific arguments
     env_id: str = "Hopper-v4"
@@ -64,19 +85,23 @@ class Args:
     autotune: bool = True
     """automatic tuning of the entropy coefficient"""
 
+    def __post_init__(self):
+        # Seeding
+        if self.run_id:
+            self.seed = self.run_id
+        elif self.seed is None:
+            self.seed = np.random.randint(2 ** 32 - 1)
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        # Output path setup
+        self.output_dir = f"{self.output_rootdir}/{self.env_id}/sac/{self.output_subdir}"
+        if self.run_id is not None:
+            self.output_dir += f"/run_{self.run_id}"
         else:
-            env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
-        return env
+            run_id = get_latest_run_id(log_path=self.output_dir, log_name='run_') + 1
+            self.output_dir += f"/run_{run_id}"
 
-    return thunk
+        if self.eval_freq is None:
+            self.eval_freq = max(self.total_timesteps // self.num_evals, 1)
 
 
 # ALGO LOGIC: initialize agent here:
@@ -135,11 +160,14 @@ class Actor(nn.Module):
 
         return mean, log_std
 
-    def get_action(self, x):
+    def get_action(self, x, sample=True):
         mean, log_std = self(x)
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        if sample:
+            x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        else:
+            x_t = mean
         y_t = torch.tanh(x_t)
         action = y_t * self.action_scale + self.action_bias
         log_prob = normal.log_prob(x_t)
@@ -161,36 +189,37 @@ poetry run pip install "stable_baselines3==2.0.0a1"
         )
 
     args = tyro.cli(Args)
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = args.torch_deterministic
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(os.path.join(args.output_dir, "config.yml"), "w") as f:
+        yaml.dump(args, f, sort_keys=True)
+
+    # Setup tracking
     if args.track:
         import wandb
 
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            sync_tensorboard=True,
             config=vars(args),
-            name=run_name,
+            name=args.output_dir,
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, "") for i in range(args.num_envs)]
+    )
+    envs_eval = gym.vector.SyncVectorEnv(
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, "") for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -224,6 +253,10 @@ poetry run pip install "stable_baselines3==2.0.0a1"
         n_envs=args.num_envs,
         handle_timeout_termination=False,
     )
+
+    # Logging
+    logs = defaultdict(list)
+    eval_count = 0
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
@@ -238,15 +271,6 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info is not None:
-                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
@@ -310,22 +334,59 @@ poetry run pip install "stable_baselines3==2.0.0a1"
                 for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
-            if global_step % 100 == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                writer.add_scalar("losses/alpha", alpha, global_step)
-                print("SPS:", int(global_step / (time.time() - start_time)))
-                writer.add_scalar(
-                    "charts/SPS",
-                    int(global_step / (time.time() - start_time)),
-                    global_step,
-                )
+        # Evaluation
+        if global_step % args.eval_freq == 0:
+            eval_count += 1
+
+            return_avg, return_std, success_avg, success_std = simulate(
+                env=envs_eval,
+                actor=actor,
+                eval_episodes=args.eval_episodes
+            )
+
+            print(
+                f"Eval num_timesteps={global_step}, "
+                f"episode_return={return_avg:.2f} +/- {return_std:.2f}\n"
+                f"episode_success={success_avg:.2f} +/- {success_std:.2f}\n"
+            )
+
+            # Log metrics
+            logs['timestep'].append(global_step)
+            logs['return'].append(return_avg)
+            logs['success_rate'].append(success_avg)
+
+            if global_step > args.learning_starts:
+                # Log SAC specific metrics
+                logs['sac/q_loss'].append(qf_loss.item())
+                logs['sac/actor_loss'].append(actor_loss.item() if 'actor_loss' in locals() else 0.0)
+                logs['sac/alpha'].append(alpha)
                 if args.autotune:
-                    writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+                    logs['sac/alpha_loss'].append(alpha_loss.item() if 'alpha_loss' in locals() else 0.0)
+
+            # Calculate steps per second
+            sps = int(global_step / (time.time() - start_time))
+            logs['sps'].append(sps)
+
+            # Save logs
+            np.savez(
+                f'{args.output_dir}/evaluations.npz',
+                **logs,
+            )
+
+            # Save policy if requested
+            if args.save_policy:
+                torch.save(actor, f"{args.output_dir}/policy_{eval_count}.pt")
+
+            # Log to wandb if tracking
+            if args.track:
+                log_wandb = {}
+                for key, value in logs.items():
+                    log_wandb[key] = value[-1]
+                wandb.log(log_wandb)
+
+    if args.save_model:
+        model_path = f"{args.output_dir}/policy.pt"
+        torch.save((actor.state_dict(), qf1.state_dict(), qf2.state_dict()), model_path)
+        print(f"model saved to {model_path}")
 
     envs.close()
-    writer.close()
