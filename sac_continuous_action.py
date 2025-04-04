@@ -71,7 +71,7 @@ class Args:
     """target smoothing coefficient (default: 0.005)"""
     batch_size: int = 256
     """the batch size of sample from the reply memory"""
-    learning_starts: int = 5e3
+    learning_starts: int = int(5e3)
     """timestep to start learning"""
     policy_lr: float = 3e-4
     """the learning rate of the policy network optimizer"""
@@ -107,6 +107,51 @@ class Args:
         if self.eval_freq is None:
             self.eval_freq = max(self.total_timesteps // self.num_evals, 1)
 
+
+
+def simulate(env, actor, eval_episodes, eval_steps=np.inf):
+    logs = defaultdict(list)
+    step = 0
+    for episode_i in range(eval_episodes):
+        logs_episode = defaultdict(list)
+
+        obs, _ = env.reset()
+        done = False
+
+        while not done:
+
+            # ALGO LOGIC: put action logic here
+            with torch.no_grad():
+                output = actor.get_action(torch.Tensor(obs).to('cpu'), sample=False)
+                actions, *the_rest = output
+                actions = actions.cpu().numpy()
+
+            # TRY NOT TO MODIFY: execute the game and log data.
+            next_obs, rewards, terminateds, truncateds, infos = env.step(actions)
+            done = np.logical_or(terminateds, truncateds)
+
+            # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+            obs = next_obs
+            logs_episode['rewards'].append(rewards)
+
+            step += 1
+
+            if step >= eval_steps:
+                break
+        if step >= eval_steps:
+            break
+
+        logs['returns'].append(np.sum(logs_episode['rewards']))
+        try:
+            logs['successes'].append(infos['is_success'])
+        except:
+            logs['successes'].append(False)
+
+    return_avg = np.mean(logs['returns'])
+    return_std = np.std(logs['returns'])
+    success_avg = np.mean(logs['successes'])
+    success_std = np.std(logs['successes'])
+    return return_avg, return_std, success_avg, success_std
 
 # ALGO LOGIC: initialize agent here:
 class SoftQNetwork(nn.Module):

@@ -121,8 +121,7 @@ def simulate(env, actor, eval_episodes, eval_steps=np.inf):
 
             # ALGO LOGIC: put action logic here
             with torch.no_grad():
-                output = actor.get_action(torch.Tensor(obs).to('cpu'), sample=False)
-                actions, *the_rest = output
+                actions = actor.get_action(torch.Tensor(obs).to('cpu'), sample=False)
                 actions = actions.cpu().numpy()
 
             # TRY NOT TO MODIFY: execute the game and log data.

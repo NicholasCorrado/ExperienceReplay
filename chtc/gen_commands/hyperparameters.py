@@ -10,7 +10,7 @@ MEMDISK = {
     'Hopper-v4': (2.1, 2),
     'Walker2d-v4': (2.1, 2),
     'Ant-v4': (2.1, 2),
-    'Humanoid-v4': (2.5, 2),
+    'Humanoid-v4': (3, 3),
 }
 
 TIMESTEPS = {
