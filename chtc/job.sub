@@ -1,7 +1,8 @@
 # Python build file
 
 universe = container
-container_image = docker://nicholascorrado/props:chtc
+container_image = docker://python:3.11-slim 
+#docker://nicholascorrado/props:chtc
 
 executable = job.sh
 initial_dir = $(results_dir)

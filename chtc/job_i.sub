@@ -1,7 +1,8 @@
 # Python build file
 
+# universe = vanilla
 universe = container
-container_image = docker://nicholascorrado/props:chtc
+container_image = docker://python:3.11-slim 
 
 executable = job.sh
 initial_dir = $(results_dir)
@@ -18,7 +19,7 @@ transfer_output_files = results_$(Process).tar.gz
 # Indicate which version of Linux (CentOS) you want to build your packages on
 requirements = (Target.HasCHTCStaging == true)
 request_cpus = 1
-request_memory = 5GB
-request_disk = 10GB
+request_memory = 2GB
+request_disk = 5GB
 
 queue 1
