@@ -52,7 +52,7 @@ class Args:
     seed: int = None
 
     # Evaluation
-    num_evals: int = 20
+    num_evals: int = 40
     eval_freq: int = None
     eval_episodes: int = 20
 
@@ -144,6 +144,9 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
+        [make_env(args.env_id, args.seed + i, i, args.capture_video, "") for i in range(args.num_envs)]
+    )
+    envs_eval = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.seed + i, i, args.capture_video, "") for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -247,9 +250,6 @@ poetry run pip install "stable_baselines3==2.0.0a1"
         # Evaluation
         if global_step % args.eval_freq == 0:
             eval_count += 1
-            envs_eval = copy.deepcopy(envs)
-
-            # Set eval mode if needed - add appropriate method to make_env if needed
 
             return_avg, return_std, success_avg, success_std = simulate(
                 env=envs_eval,

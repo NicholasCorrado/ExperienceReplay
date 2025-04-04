@@ -1,16 +1,16 @@
 MEMDISK = {
-    # 'CartPole-v1': (0.7, 0.3),
-    # 'LunarLander-v2': (0.7, 0.3),
-    # 'Discrete2D100-v0': (0.7, 0.3),
+    # 'CartPole-v1': (2.1, 2),
+    # 'LunarLander-v2': (2.1, 2),
+    # 'Discrete2D100-v0': (2.1, 2),
 
-    'InvertedPendulum-v4': (0.7, 0.3),
-    'InvertedDoublePendulum-v4': (0.7, 0.3),
-    'Swimmer-v4': (0.7, 0.3),
-    'HalfCheetah-v4': (0.7, 0.3),
-    'Hopper-v4': (0.7, 0.3),
-    'Walker2d-v4': (0.7, 0.3),
-    'Ant-v4': (0.7, 0.3),
-    'Humanoid-v4': (1, 0.3),
+    'InvertedPendulum-v4': (2.1, 2),
+    'InvertedDoublePendulum-v4': (2.1, 2),
+    'Swimmer-v4': (2.1, 2),
+    'HalfCheetah-v4': (2.1, 2),
+    'Hopper-v4': (2.1, 2),
+    'Walker2d-v4': (2.1, 2),
+    'Ant-v4': (2.1, 2),
+    'Humanoid-v4': (2.5, 2),
 }
 
 TIMESTEPS = {
@@ -23,9 +23,9 @@ TIMESTEPS = {
     'Swimmer-v4': int(1e6),
     'HalfCheetah-v4': int(1e6),
     'Hopper-v4': int(1e6),
-    'Walker2d-v4': int(2e6),
-    'Ant-v4': int(2e6),
-    'Humanoid-v4': int(4e6),
+    'Walker2d-v4': int(1e6),
+    'Ant-v4': int(1e6),
+    'Humanoid-v4': int(1e6),
 }
 
 PARAMS = {
