@@ -14,9 +14,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 import yaml
-from stable_baselines3.common.buffers import ReplayBuffer
+# from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.utils import get_latest_run_id
 
+from replay_buffer import ReplayBuffer
 from utils import make_env, simulate
 
 
@@ -84,6 +85,9 @@ class Args:
     """Entropy regularization coefficient."""
     autotune: bool = True
     """automatic tuning of the entropy coefficient"""
+
+    adaptive: bool = False
+    temperature: float = 1
 
     def __post_init__(self):
         # Seeding
@@ -284,7 +288,10 @@ poetry run pip install "stable_baselines3==2.0.0a1"
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
+            if args.adaptive:
+                data = rb.sample_adaptive(args.batch_size, args.learning_starts, args.temperature)
+            else:
+                data = rb.sample(args.batch_size)
             with torch.no_grad():
                 next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
                 qf1_next_target = qf1_target(data.next_observations, next_state_actions)
