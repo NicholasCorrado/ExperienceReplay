@@ -1,0 +1,25 @@
+# Python build file
+
+# universe = vanilla
+universe = container
+container_image = docker://python:3.11-slim 
+
+executable = job.sh
+initial_dir = $(results_dir)
+log = ../../$(log_dir)/$(Process).log
+output = ../../$(log_dir)/$(Process).out
+error = ../../$(log_dir)/$(Process).err
+arguments = $(Process) $(Step) $(params)
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files = results_$(Process).tar.gz
+
+#+IsBuildJob = true
+# Indicate which version of Linux (CentOS) you want to build your packages on
+requirements = (Target.HasCHTCStaging == true)
+request_cpus = 1
+request_memory = 2GB
+request_disk = 5GB
+
+queue 1

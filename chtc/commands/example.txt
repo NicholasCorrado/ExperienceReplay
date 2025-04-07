@@ -1,0 +1,8 @@
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id InvertedPendulum-v4 --learning_rate 0.0003 --total_timesteps 300000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id InvertedDoublePendulum-v4 --learning_rate 0.0003 --total_timesteps 300000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id Swimmer-v4 --learning_rate 0.0003 --total_timesteps 1000000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id Hopper-v4 --learning_rate 0.0003 --total_timesteps 1000000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id HalfCheetah-v4 --learning_rate 0.0003 --total_timesteps 1000000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id Walker2d-v4 --learning_rate 0.0003 --total_timesteps 2000000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id Ant-v4 --learning_rate 0.0003 --total_timesteps 2000000 --eval_episodes 20
+2,5,python ddpg_continuous_action.py --output_subdir lr_0.0003/bs_256 --env_id Humanoid-v4 --learning_rate 0.0003 --total_timesteps 4000000 --eval_episodes 20
